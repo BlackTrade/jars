@@ -1,0 +1,27 @@
+-- comment
+%%time
+import logging
+import sys
+import time
+
+logging.basicConfig(stream=sys.stdout, level=logging.INFO)
+
+# small
+table_name_list = ["TMP_PK_MAP_SMS_1000LMT",
+                   "TMP_PK_MAP_USER_ACTIONS_1000LMT",
+                   "TMP_PK_MAP_USER_ACTIONS2_250LMT",
+                   "TMP_PK_MAP_VASP_SERV_3000LMT",
+                   "TMP_PK_MAP_ROAM14"]
+
+index_dict = {}
+
+def get_distinct_inqrid(table_name):    
+    t0 =  time.time()
+    
+    query = f"SELECT /*+PARALLEL(8)*/ DISTINCT INQR_ID  FROM {table_name}"
+    logging.info(query)
+    index = ora.read_sql(query)   
+    index_dict[table_name] = index.INQR_ID.values.tolist()
+    
+    t1 =  time.time()
+    logging.info("Load {:.3f} s., DISTINCT INQR_ID {}".format(t1 - t0, table_name))   
