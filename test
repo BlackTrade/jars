@@ -1,4 +1,847 @@
--- comment
+в этом скрипте будут добавлены куски с разных других ноутбуков из которых будет собираться продуктовая таблица первоначально нужно понять какие значения признака будут участвовать в пивоте чтобы после после появления нового значения в признаке пивот не развалился поскольку новое значение будет добавлять новую колонку при пивоте на которую не была натренирована модель
+import os
+import sys
+sys.path.append(os.path.expanduser('~/data'))
+
+import bd_utils.oracle as oracle
+ora = oracle.OraConnection('dwx', 'MF_BIGDATA_INFRA_DEV')
+Password:········
+import logging
+import sys
+import time
+
+logging.basicConfig(stream=sys.stdout, level=logging.INFO)
+TMP_PK_DICT_SMS
+SELECT COUNT(1) FROM CNC_STG.SMS_YYYYMM_1_UTF WHERE 1=1 AND SEND_DATE > '01-06-2019' AND SEND_DATE < '01-06-2020' --824 060
+table_dict_sms = 'TMP_PK_DICT_SMS' # SMGT_SMGT_ID
+start_date = '01-06-2019'
+end_date =   '01-06-2020'
+
+
+QUERY = """{actions} SELECT /*+PARALLEL(8)*/ 
+            MSISDN_FROM ||  '_' || SMGT_SMGT_ID AS MSISDN_FROM_SMGT_SMGT_ID,  
+            COUNT(1) AS CNT
+            FROM CNC_STG.SMS_YYYYMM_1_UTF 
+            WHERE SEND_DATE > '{start_date}' AND SEND_DATE < '{end_date}'
+            GROUP  BY MSISDN_FROM ||  '_' || SMGT_SMGT_ID
+            ORDER BY CNT"""  
+
+def _drop_table():
+    query = """BEGIN
+                    EXECUTE IMMEDIATE 'DROP TABLE {table_name}';
+                EXCEPTION
+                    WHEN OTHERS THEN NULL;
+                END;"""
+
+    ora.execute_sql(query.format(table_name = table_dict_sms))     
+    logging.info(f"Drop {table_name}")    
+    
+def _create_empty_table():    
+    query = QUERY.format(actions = f"CREATE TABLE {table_dict_sms} AS",
+                         start_date = '01-06-2020',    
+                         end_date   = '01-06-2020')  
+    
+    ora.execute_sql(query)   
+    logging.info(f"Create empty {table_dict_sms}")
+    
+def _insert_table(): 
+    t0 =  time.time()  
+    logging.info(f"Start insert {table_dict_sms}")
+    
+    query = QUERY.format(actions = f"INSERT INTO {table_dict_sms}",
+                         start_date = start_date,    
+                         end_date = end_date)    
+    
+    ora.execute_sql(query)     
+    t1 =  time.time()           
+    logging.info("Load {:.3f} s.".format(t1 - t0)) 
+    
+def create_table():
+    _drop_table()
+    _create_empty_table()        
+    _insert_table()        
+%%time
+create_table()
+INFO:root:Drop TMP_PK_DICT_SMS
+INFO:root:Create empty TMP_PK_DICT_SMS
+INFO:root:Start insert TMP_PK_DICT_SMS
+INFO:root:Load 38.647 s.
+CPU times: user 21.2 ms, sys: 11.3 ms, total: 32.5 ms
+Wall time: 39.1 s
+TMP_PK_MAPSMS{ }LMT
+# generate_script_oracle2  + # generate_full_dataset3
+
+date_list  = ['01-06-2019','15-06-2019',
+              '01-07-2019','15-07-2019',
+              '01-08-2019','15-08-2019',
+              '01-09-2019','15-09-2019',
+              '01-10-2019','15-10-2019',
+              '01-11-2019','15-11-2019',
+              '01-12-2019','15-12-2019',
+              '01-01-2020','15-01-2020',
+              '01-02-2020','15-02-2020',
+              '01-03-2020','15-03-2020',
+              '01-04-2020','15-04-2020',
+              '01-05-2020']
+
+start_date_list = date_list[:-1]
+end_date_list = date_list[1:]
+start_window_list = ['15-04-2019', '01-05-2019','15-05-2019'] + date_list[:-4]
+query1_ = """{actions}            
+            SELECT /*+PARALLEL(8)*/
+            INQR_ID, MSISDN, DATE_CLAIMS, SEND_DATE,
+            CODE_LEVEL_3, MSISDN_FROM_SMGT_SMGT_ID     
+            FROM
+                  (SELECT  INQR_ID, MSISDN, CREATE_DATE AS DATE_CLAIMS, CODE_LEVEL_3 
+                   FROM TMP_PK_INQUIRIES  
+                   WHERE CREATE_DATE >= '{start_date}'  AND CREATE_DATE < '{end_date}'
+                   AND BIS_CMS_COMM_CHANNEL in ('Звонок', 'ЧАТ ЛК', 'Чат')
+                   ) T1 
+            JOIN
+                  (SELECT MSISDN_TO, SEND_DATE,
+                   MSISDN_FROM ||  '_' || SMGT_SMGT_ID AS MSISDN_FROM_SMGT_SMGT_ID 
+                   FROM CNC_STG.SMS_YYYYMM_1_UTF  
+                   WHERE CAST(SEND_DATE AS DATE) >= '{start_window}' AND CAST(SEND_DATE AS DATE) < '{end_date}'
+                   ) T2 
+            ON T1.MSISDN = T2.MSISDN_TO 
+            AND  T1.DATE_CLAIMS >= CAST(T2.SEND_DATE AS DATE) 
+            AND (T1.DATE_CLAIMS - {window}) < CAST(T2.SEND_DATE AS DATE)"""
+
+query2_= """{actions} 
+            SELECT /*+PARALLEL(8)*/
+            INQR_ID, MSISDN, DATE_CLAIMS, CODE_LEVEL_3, MSISDN_FROM_SMGT_SMGT_ID,
+            COUNT(1) AS CNT_SMS,
+            ROUND((MAX(CAST(SEND_DATE AS DATE) ) - MIN(CAST(SEND_DATE AS DATE))),4) AS DURATION,
+            ROUND((DATE_CLAIMS - MAX(CAST(SEND_DATE AS DATE))), 4)  AS DIFF_CLAIMS
+            FROM   
+                (SELECT 
+                    CASE WHEN T2.MSISDN_FROM_SMGT_SMGT_ID IS NULL
+                      THEN 'RARE'
+                      ELSE T2.MSISDN_FROM_SMGT_SMGT_ID 
+                    END AS MSISDN_FROM_SMGT_SMGT_ID,
+                    INQR_ID, MSISDN, DATE_CLAIMS, SEND_DATE, CODE_LEVEL_3
+                FROM
+                     {table_sms} T1
+                LEFT JOIN ---  CNT < cnt_limit БУДУТ NONE
+                     (SELECT MSISDN_FROM_SMGT_SMGT_ID FROM  {table_dict_sms} WHERE CNT>= {cnt_limit}) T2
+                ON  T1.MSISDN_FROM_SMGT_SMGT_ID = T2.MSISDN_FROM_SMGT_SMGT_ID) 
+            GROUP BY  INQR_ID, MSISDN, DATE_CLAIMS, CODE_LEVEL_3, MSISDN_FROM_SMGT_SMGT_ID"""
+table_dict_sms = 'TMP_PK_DICT_SMS'
+table_dict_sms
+'TMP_PK_DICT_SMS'
+def _drop_table():
+    query = """BEGIN
+                    EXECUTE IMMEDIATE 'DROP TABLE {table_name}';
+                EXCEPTION
+                    WHEN OTHERS THEN NULL;
+                END;"""
+    
+    ora.execute_sql(query.format(table_name = table_sms_)) 
+    ora.execute_sql(query.format(table_name = table_sms ))     
+    logging.info(f"Drop {table_sms_}  {table_sms}") 
+    
+def _create_empty_table():  
+    ora.execute_sql(query1_.format(actions = f'CREATE TABLE {table_sms_} AS',
+                             start_date =   '01-01-2020',
+                             end_date   =   '01-01-2020',
+                             start_window = '01-01-2020',
+                             window  = 1   ))     
+    
+    ora.execute_sql(query2_.format(actions = f'CREATE TABLE {table_sms} AS',
+                              table_sms =  table_sms_,    
+                              table_dict_sms = table_dict_sms,
+                              cnt_limit = 0.5 )) 
+    
+    logging.info(f"Create empty {table_sms_}")
+    logging.info(f"Create empty {table_sms}")
+    
+def _insert_table():    
+    logging.info(f"Start insert {table_sms} cnt_limit - {cnt_limit} window - {window}")
+
+    for start_date_, start_window_, end_date_ in zip(start_date_list, start_window_list, end_date_list):
+
+        t0 =  time.time()    
+        query1 = query1_.format(actions = f"""INSERT INTO {table_sms} 
+                                  WITH {table_sms_} AS (""",             
+                                  start_date = start_date_,
+                                  end_date   = end_date_,
+                                  start_window = start_window_,
+                                  window  = window   )
+
+        query2 = query2_.format(actions = ') ', # after WITH TMP_PK_MAP_USER_ACTIONS3 AS ( 
+                                table_sms =  table_sms_,
+                                table_dict_sms = table_dict_sms,
+                                cnt_limit = cnt_limit)  
+        
+        #print(query1)
+        ora.execute_sql(query1 + query2)    
+    
+        t1 =  time.time()  
+        logging.info("Load {:.3f} s.,  end_date - {}".format(t1 - t0, end_date_)) 
+
+        query = f"""SELECT  SEGMENT_NAME, BYTES/1024/1024/1024  AS SIZE_G FROM USER_SEGMENTS
+                    WHERE SEGMENT_NAME = UPPER( '{table_sms}' )"""
+
+        df = ora.read_sql(query) 
+        size_table = df['SIZE_G'].values[0]
+
+        if size_table > 10: 
+                ora.execute_sql(f"ALTER TABLE {table_sms} MOVE COMPRESS FOR QUERY HIGH PARALLEL 8")   
+                df = ora.read_sql(query) 
+                size_table = df['SIZE_G'].values[0]
+
+        t2 =  time.time() 
+        logging.info("Load {:.3f} s.,  size_table - {:.2f} G".format(t2 - t1, size_table))        
+        #break  
+cnt_limit = 10000
+str(cnt_limit)[:-3]
+'10'
+%%time
+
+window = 15
+cnt_limit = 10000
+table_sms_ = 'TMP_PK_MAP_SMS_'
+table_sms  = f"TMP_PK_MAP_SMS_{str(cnt_limit)[:-3]}LMT"  
+
+start_date_ =   '15-12-2019'
+end_date_  =    '16-12-2019'
+start_window_ = '10-12-2019'
+
+_drop_table()
+_create_empty_table()
+
+query1 = query1_.format(actions = f"""INSERT INTO {table_sms} 
+                                  WITH {table_sms_} AS (""",             
+                                  start_date = start_date_,
+                                  end_date   = end_date_,
+                                  start_window = start_window_,
+                                  window  = window   )
+
+query2 = query2_.format(actions = ') ', # after WITH TMP_PK_MAP_USER_ACTIONS3 AS ( 
+                        table_sms =  table_sms_,
+                        table_dict_sms = table_dict_sms,
+                        cnt_limit = cnt_limit  )  
+        
+ora.execute_sql(query1 + query2)
+INFO:root:Drop TMP_PK_MAP_SMS_  TMP_PK_MAP_SMS_10LMT
+INFO:root:Create empty TMP_PK_MAP_SMS_
+INFO:root:Create empty TMP_PK_MAP_SMS_10LMT
+CPU times: user 38.4 ms, sys: 13.8 ms, total: 52.1 ms
+Wall time: 2min 22s
+True
+SELECT * FROM TMP_PK_DICT_SMS WHERE CNT> 500 --500 42 --1000 30 --10000 14
+def create_table():  
+    _drop_table()
+    _create_empty_table()        
+    _insert_table()   
+%%time
+window = 45 
+cnt_limit = 500
+
+table_dict_sms = 'TMP_PK_DICT_SMS'
+table_sms_ = 'TMP_PK_MAP_SMS_'
+table_sms  = f"TMP_PK_MAP_SMS_{str(cnt_limit)}LMT"   
+
+create_table()
+INFO:root:Drop TMP_PK_MAP_SMS_  TMP_PK_MAP_SMS_500LMT
+INFO:root:Create empty TMP_PK_MAP_SMS_
+INFO:root:Create empty TMP_PK_MAP_SMS_500LMT
+INFO:root:Start insert TMP_PK_MAP_SMS_500LMT cnt_limit - 500 window - 45
+INFO:root:Load 591.630 s.,  end_date - 15-06-2019
+INFO:root:Load 2.913 s.,  size_table - 0.00 G
+INFO:root:Load 534.847 s.,  end_date - 01-07-2019
+INFO:root:Load 1.282 s.,  size_table - 0.00 G
+INFO:root:Load 514.642 s.,  end_date - 15-07-2019
+INFO:root:Load 1.508 s.,  size_table - 0.00 G
+INFO:root:Load 750.505 s.,  end_date - 01-08-2019
+INFO:root:Load 1.484 s.,  size_table - 0.00 G
+INFO:root:Load 666.472 s.,  end_date - 15-08-2019
+INFO:root:Load 1.207 s.,  size_table - 0.00 G
+INFO:root:Load 465.865 s.,  end_date - 01-09-2019
+INFO:root:Load 1.576 s.,  size_table - 0.30 G
+INFO:root:Load 458.663 s.,  end_date - 15-09-2019
+INFO:root:Load 1.728 s.,  size_table - 0.98 G
+INFO:root:Load 676.679 s.,  end_date - 01-10-2019
+INFO:root:Load 2.523 s.,  size_table - 1.94 G
+INFO:root:Load 502.730 s.,  end_date - 15-10-2019
+INFO:root:Load 1.390 s.,  size_table - 2.82 G
+INFO:root:Load 1637.583 s.,  end_date - 01-11-2019
+INFO:root:Load 1.546 s.,  size_table - 3.92 G
+INFO:root:Load 544.525 s.,  end_date - 15-11-2019
+INFO:root:Load 1.110 s.,  size_table - 4.79 G
+INFO:root:Load 604.549 s.,  end_date - 01-12-2019
+INFO:root:Load 1.236 s.,  size_table - 5.73 G
+INFO:root:Load 495.108 s.,  end_date - 15-12-2019
+INFO:root:Load 1.015 s.,  size_table - 6.58 G
+INFO:root:Load 556.837 s.,  end_date - 01-01-2020
+INFO:root:Load 1.254 s.,  size_table - 7.75 G
+INFO:root:Load 522.394 s.,  end_date - 15-01-2020
+INFO:root:Load 1.370 s.,  size_table - 8.68 G
+INFO:root:Load 879.656 s.,  end_date - 01-02-2020
+INFO:root:Load 0.946 s.,  size_table - 9.96 G
+INFO:root:Load 852.019 s.,  end_date - 15-02-2020
+INFO:root:Load 97.481 s.,  size_table - 2.48 G
+INFO:root:Load 849.059 s.,  end_date - 01-03-2020
+INFO:root:Load 1.258 s.,  size_table - 2.79 G
+INFO:root:Load 2077.911 s.,  end_date - 15-03-2020
+INFO:root:Load 1.085 s.,  size_table - 3.04 G
+INFO:root:Load 1174.086 s.,  end_date - 01-04-2020
+INFO:root:Load 1.092 s.,  size_table - 3.33 G
+INFO:root:Load 438.647 s.,  end_date - 15-04-2020
+INFO:root:Load 1.207 s.,  size_table - 3.58 G
+INFO:root:Load 417.202 s.,  end_date - 01-05-2020
+INFO:root:Load 0.950 s.,  size_table - 3.83 G
+CPU times: user 814 ms, sys: 501 ms, total: 1.31 s
+Wall time: 4h 32min 21s
+select /*+PARALLEL(8)*/ count(1) from TMP_PK_MAP_SMS_500LMT -- 206 258 235
+%%time
+window = 45 
+cnt_limit = 10000
+
+table_dict_sms = 'TMP_PK_DICT_SMS'
+table_sms_ = 'TMP_PK_MAP_SMS_'
+table_sms  = f"TMP_PK_MAP_SMS_{str(cnt_limit)}LMT"   
+
+create_table()
+INFO:root:Drop TMP_PK_MAP_SMS_  TMP_PK_MAP_SMS_10000LMT
+INFO:root:Create empty TMP_PK_MAP_SMS_
+INFO:root:Create empty TMP_PK_MAP_SMS_10000LMT
+INFO:root:Start insert TMP_PK_MAP_SMS_10000LMT cnt_limit - 10000 window - 45
+INFO:root:Load 232.318 s.,  end_date - 10-06-2019
+INFO:root:Load 1.334 s.,  size_table - 0.00 G
+INFO:root:Load 208.276 s.,  end_date - 20-06-2019
+INFO:root:Load 2.080 s.,  size_table - 0.00 G
+INFO:root:Load 248.002 s.,  end_date - 01-07-2019
+INFO:root:Load 1.223 s.,  size_table - 0.00 G
+INFO:root:Load 253.304 s.,  end_date - 10-07-2019
+INFO:root:Load 1.135 s.,  size_table - 0.00 G
+INFO:root:Load 246.164 s.,  end_date - 20-07-2019
+INFO:root:Load 1.908 s.,  size_table - 0.00 G
+INFO:root:Load 286.219 s.,  end_date - 01-08-2019
+INFO:root:Load 1.235 s.,  size_table - 0.00 G
+INFO:root:Load 354.593 s.,  end_date - 10-08-2019
+INFO:root:Load 0.989 s.,  size_table - 0.00 G
+INFO:root:Load 304.999 s.,  end_date - 20-08-2019
+INFO:root:Load 1.093 s.,  size_table - 0.00 G
+INFO:root:Load 259.343 s.,  end_date - 01-09-2019
+INFO:root:Load 1.193 s.,  size_table - 0.25 G
+INFO:root:Load 256.994 s.,  end_date - 10-09-2019
+INFO:root:Load 1.037 s.,  size_table - 0.48 G
+INFO:root:Load 267.839 s.,  end_date - 20-09-2019
+INFO:root:Load 1.333 s.,  size_table - 0.59 G
+INFO:root:Load 0.202 s.,  end_date - 01-10-2019
+INFO:root:Load 1.298 s.,  size_table - 0.59 G
+INFO:root:Load 0.198 s.,  end_date - 10-10-2019
+INFO:root:Load 1.196 s.,  size_table - 0.59 G
+INFO:root:Load 0.130 s.,  end_date - 20-10-2019
+INFO:root:Load 1.055 s.,  size_table - 0.59 G
+INFO:root:Load 0.143 s.,  end_date - 01-11-2019
+INFO:root:Load 1.103 s.,  size_table - 0.59 G
+INFO:root:Load 0.197 s.,  end_date - 10-11-2019
+INFO:root:Load 1.025 s.,  size_table - 0.59 G
+INFO:root:Load 0.200 s.,  end_date - 20-11-2019
+INFO:root:Load 1.162 s.,  size_table - 0.59 G
+INFO:root:Load 0.169 s.,  end_date - 01-12-2019
+INFO:root:Load 1.263 s.,  size_table - 0.59 G
+INFO:root:Load 0.151 s.,  end_date - 10-12-2019
+INFO:root:Load 1.006 s.,  size_table - 0.59 G
+INFO:root:Load 0.213 s.,  end_date - 20-12-2019
+INFO:root:Load 0.958 s.,  size_table - 0.59 G
+INFO:root:Load 0.136 s.,  end_date - 01-01-2020
+INFO:root:Load 0.958 s.,  size_table - 0.59 G
+INFO:root:Load 0.245 s.,  end_date - 10-01-2020
+INFO:root:Load 0.985 s.,  size_table - 0.59 G
+CPU times: user 2.64 s, sys: 575 ms, total: 3.21 s
+Wall time: 49min 7s
+select /*+PARALLEL(8)*/ count(1) from TMP_PK_MAP_SMS_10000LMT --7 611 158 !!!
+%%time
+window = 45 
+cnt_limit = 1000
+
+table_dict_sms = 'TMP_PK_DICT_SMS'
+table_sms_ = 'TMP_PK_MAP_SMS_'
+table_sms  = f"TMP_PK_MAP_SMS_{str(cnt_limit)}LMT"   
+
+create_table()
+INFO:root:Drop TMP_PK_MAP_SMS_  TMP_PK_MAP_SMS_1000LMT
+INFO:root:Create empty TMP_PK_MAP_SMS_
+INFO:root:Create empty TMP_PK_MAP_SMS_1000LMT
+INFO:root:Start insert TMP_PK_MAP_SMS_1000LMT cnt_limit - 1000 window - 45
+INFO:root:Load 1556.489 s.,  end_date - 15-06-2019
+INFO:root:Load 1.838 s.,  size_table - 0.00 G
+INFO:root:Load 1560.425 s.,  end_date - 01-07-2019
+INFO:root:Load 1.334 s.,  size_table - 0.00 G
+INFO:root:Load 936.329 s.,  end_date - 15-07-2019
+INFO:root:Load 1.728 s.,  size_table - 0.00 G
+INFO:root:Load 544.624 s.,  end_date - 01-08-2019
+INFO:root:Load 1.599 s.,  size_table - 0.00 G
+INFO:root:Load 274.233 s.,  end_date - 15-08-2019
+INFO:root:Load 1.995 s.,  size_table - 0.00 G
+INFO:root:Load 289.859 s.,  end_date - 01-09-2019
+INFO:root:Load 0.901 s.,  size_table - 0.25 G
+INFO:root:Load 325.769 s.,  end_date - 15-09-2019
+INFO:root:Load 1.192 s.,  size_table - 0.90 G
+INFO:root:Load 376.402 s.,  end_date - 01-10-2019
+INFO:root:Load 1.791 s.,  size_table - 1.83 G
+INFO:root:Load 358.153 s.,  end_date - 15-10-2019
+INFO:root:Load 1.141 s.,  size_table - 2.68 G
+INFO:root:Load 358.363 s.,  end_date - 01-11-2019
+INFO:root:Load 5.850 s.,  size_table - 3.72 G
+INFO:root:Load 289.728 s.,  end_date - 15-11-2019
+INFO:root:Load 1.064 s.,  size_table - 4.50 G
+INFO:root:Load 344.724 s.,  end_date - 01-12-2019
+INFO:root:Load 1.123 s.,  size_table - 5.41 G
+INFO:root:Load 304.931 s.,  end_date - 15-12-2019
+INFO:root:Load 1.683 s.,  size_table - 6.23 G
+INFO:root:Load 341.511 s.,  end_date - 01-01-2020
+INFO:root:Load 1.812 s.,  size_table - 7.29 G
+INFO:root:Load 642.971 s.,  end_date - 15-01-2020
+INFO:root:Load 1.425 s.,  size_table - 8.20 G
+INFO:root:Load 648.261 s.,  end_date - 01-02-2020
+INFO:root:Load 1.325 s.,  size_table - 9.46 G
+INFO:root:Load 369.066 s.,  end_date - 15-02-2020
+INFO:root:Load 95.448 s.,  size_table - 2.37 G
+INFO:root:Load 422.926 s.,  end_date - 01-03-2020
+INFO:root:Load 1.044 s.,  size_table - 2.65 G
+INFO:root:Load 336.678 s.,  end_date - 15-03-2020
+INFO:root:Load 1.378 s.,  size_table - 2.94 G
+INFO:root:Load 426.771 s.,  end_date - 01-04-2020
+INFO:root:Load 1.101 s.,  size_table - 3.19 G
+INFO:root:Load 294.144 s.,  end_date - 15-04-2020
+INFO:root:Load 1.123 s.,  size_table - 3.40 G
+INFO:root:Load 339.272 s.,  end_date - 01-05-2020
+INFO:root:Load 1.953 s.,  size_table - 3.69 G
+CPU times: user 779 ms, sys: 405 ms, total: 1.18 s
+Wall time: 3h 11min 13s
+select /*+PARALLEL(8)*/ count(1) from TMP_PK_MAP_SMS_1000LMT --196 746 825
+ 
+# generate_full_dataset3 feed_bigdata3 # из ноутбука spark_cb_
+old legacy
+Изначально собиралась отдельная общая спарс таблица для которой собирался толстый паркет файл Потом было решено протестить влияние глубины и задержки в данных на итоговый результат потому собирались отдельные таблицы для каждой глубины и задержки%%time scipy.sparse.save_npz(f"{PATH}/storage2/map_sms_{latency}_sparse.npz", sparse_matrix) np.savez(f"{PATH}/storage/column_sms_{latency}", np.array(col_name))%%time from scipy.sparse import hstack list_name_matrix = [///] first = True for name_matrix in list_name_matrix: t0 = time.time() if first: X = scipy.sparse.load_npz(f"{PATH}/storage/{name_matrix}") first = False else: X_ = scipy.sparse.load_npz(f"{PATH}/storage/{name_matrix}") X = hstack([X,X_]) del X_ gc.collect() t1 = time.time() logging.info("Load {:.3f} s., loaded sparse matrix {}".format(t1 - t0, name_matrix)) с тачки http://msk-wrk-dev02:8888/ при активированом препроде hadoop fs -copyFromLocal /data/share/pkrylov_cb/storage/x_sms* /user/pkrylov
+index_all with latency
+%%time
+import logging
+import sys
+import time
+
+logging.basicConfig(stream=sys.stdout, level=logging.INFO)
+PATH = "/data/share/pkrylov_cb"
+
+index_dict = {}
+table_name_list = ["TMP_PK_MAP_SMS_500LMT"] # + add 1000LMT
+
+
+for table_name in table_name_list:
+    t0 =  time.time()
+
+    query = f"SELECT /*+PARALLEL(8)*/ DISTINCT INQR_ID  FROM {table_name}"
+    index = ora.read_sql(query)   
+    index = set(index.INQR_ID.values.tolist())
+    index = sorted(list(index))
+    
+    print(table_name, len(index))
+    t1 =  time.time()
+    logging.info("Load {:.3f} s., DISTINCT INQR_ID {}".format(t1 - t0, table_name))   
+        
+    prefix = table_name.lower().split('_')[-1]
+    np.savez(f"{PATH}/storage2/index_sms_{prefix}.npz", np.array(index))
+    
+    t2 =  time.time()
+    logging.info("Save {:.3f} s. index_sms_{}.npz".format(t2 - t1, prefix))  
+TMP_PK_MAP_SMS_500LMT 27970718
+INFO:root:Load 814.556 s., DISTINCT INQR_ID TMP_PK_MAP_SMS_500LMT
+INFO:root:Save 9.506 s. index_sms_500lmt.npz
+CPU times: user 1min 1s, sys: 21.2 s, total: 1min 22s
+Wall time: 13min 44s
+fetch_data TMP_PK_MAPSMS
+date_list  = ['01-06-2019','10-06-2019','20-06-2019',
+              '01-07-2019','10-07-2019','20-07-2019',
+              '01-08-2019','10-08-2019','20-08-2019',
+              '01-09-2019','10-09-2019','20-09-2019',
+              '01-10-2019','10-10-2019','20-10-2019',
+              '01-11-2019','10-11-2019','20-11-2019',
+              '01-12-2019','10-12-2019','20-12-2019',
+              '01-01-2020','10-01-2020','20-01-2020',
+              '01-02-2020','10-02-2020','20-02-2020',
+              '01-03-2020','10-03-2020','20-03-2020',
+              '01-04-2020','10-04-2020','20-04-2020',
+              '01-05-2020']
+
+start_date_list = date_list[:-1]
+end_date_list = date_list[1:]
+
+dates_list = list(zip(start_date_list, end_date_list))
+import time 
+import pandas as pd
+
+batch_size = 25000000
+
+table_name = "TMP_PK_MAP_SMS_1000LMT"  #small
+
+# 500 42       TMP_PK_MAP_SMS_500LMT
+# 1000 30      TMP_PK_MAP_SMS_1000LMT
+# 10000 14     TMP_PK_MAP_SMS_10000LMT -- не используется
+
+QUERY = """SELECT   /*+PARALLEL(8)*/ INQR_ID, MSISDN_FROM_SMGT_SMGT_ID,
+            CNT_SMS, DURATION, DIFF_CLAIMS
+            FROM {table_name}
+            WHERE TRUNC(DATE_CLAIMS) >= '{start_date}' AND TRUNC(DATE_CLAIMS) < '{end_date}'"""
+
+col = ['INQR_ID','MSISDN_FROM_SMGT_SMGT_ID', 'CNT_SMS', 'DURATION', 'DIFF_CLAIMS']
+
+dtype = {'INQR_ID':'int32', 
+         'CNT_SMS':'float32', 
+         'DURATION' : 'float16', 
+         'DIFF_CLAIMS' : 'float16'}
+# 'CNT_SMS':'int32', --> 'float32'
+SELECT MAX(CNT_SMS) FROM TMP_PK_MAP_SMS_500LMT -- 179 222 dtype 'CNT_SMS':'int32'
+def fetch_data (dates):
+    
+    connection = ora.get_con_object()
+    cursor = connection.cursor()
+    
+    start_date, end_date = dates    
+    query = QUERY.format(table_name = table_name,
+                         start_date = start_date, 
+                         end_date = end_date)    
+    cursor.execute(query)
+    n_rows = 0
+
+    df = pd.DataFrame([], columns = col )    
+    logging.info("Start load {} - {}".format(start_date, end_date))
+
+    while True:
+        # fetch rows
+        t0 =  time.time()   
+        rows = cursor.fetchmany(batch_size)        
+        if not rows:
+            break
+            
+        n_rows += len(rows)
+        
+        df_ = pd.DataFrame(rows, columns = col)
+        df  = pd.concat([df, df_]).reset_index(drop=True)
+        df.fillna(0, inplace=True)
+        df = df.astype(dtype)
+
+        t1 =  time.time()
+        logging.info("Load {:.3f} s.,  fetched {} rows for dates {} - {}".format(t1 - t0, n_rows, start_date, end_date))
+        
+    logging.info("End load {} - {}".format(start_date, end_date))
+    cursor.close()
+    return df
+%%time
+import multiprocessing.dummy as multiprocessing
+logging.info("start parallel fetch ORACLE!")
+
+try:
+    processes = min(12, len(dates_list))
+    p = multiprocessing.Pool(processes = processes)
+    df_list = p.map(fetch_data, dates_list)
+
+    p.close()
+    p.join()
+
+except KeyboardInterrupt:
+    logging.info("KeyboardInterrupt !")
+INFO:root:start parallel fetch ORACLE!
+INFO:root:Start load 01-09-2019 - 10-09-2019
+INFO:root:Start load 20-09-2019 - 01-10-2019
+INFO:root:Start load 10-09-2019 - 20-09-2019
+INFO:root:Start load 20-08-2019 - 01-09-2019
+INFO:root:Start load 01-07-2019 - 10-07-2019
+INFO:root:End load 01-07-2019 - 10-07-2019
+INFO:root:Start load 01-06-2019 - 10-06-2019
+INFO:root:End load 01-06-2019 - 10-06-2019
+INFO:root:Start load 01-10-2019 - 10-10-2019
+INFO:root:Start load 10-10-2019 - 20-10-2019
+INFO:root:Start load 01-08-2019 - 10-08-2019
+INFO:root:End load 01-08-2019 - 10-08-2019
+INFO:root:Start load 20-10-2019 - 01-11-2019
+INFO:root:Start load 10-06-2019 - 20-06-2019
+INFO:root:End load 10-06-2019 - 20-06-2019
+INFO:root:Start load 10-08-2019 - 20-08-2019
+INFO:root:End load 10-08-2019 - 20-08-2019
+INFO:root:Start load 10-11-2019 - 20-11-2019
+INFO:root:Start load 20-07-2019 - 01-08-2019
+INFO:root:End load 20-07-2019 - 01-08-2019
+INFO:root:Start load 01-11-2019 - 10-11-2019
+INFO:root:Start load 20-06-2019 - 01-07-2019
+INFO:root:End load 20-06-2019 - 01-07-2019
+INFO:root:Start load 10-07-2019 - 20-07-2019
+INFO:root:End load 10-07-2019 - 20-07-2019
+INFO:root:Start load 20-11-2019 - 01-12-2019
+INFO:root:Start load 01-12-2019 - 10-12-2019
+INFO:root:Start load 10-12-2019 - 20-12-2019
+INFO:root:Load 149.926 s.,  fetched 3233845 rows for dates 20-08-2019 - 01-09-2019
+INFO:root:End load 20-08-2019 - 01-09-2019
+INFO:root:Start load 20-12-2019 - 01-01-2020
+INFO:root:Load 214.686 s.,  fetched 4997712 rows for dates 01-09-2019 - 10-09-2019
+INFO:root:End load 01-09-2019 - 10-09-2019
+INFO:root:Start load 01-01-2020 - 10-01-2020
+INFO:root:Load 295.342 s.,  fetched 6518023 rows for dates 10-09-2019 - 20-09-2019
+INFO:root:End load 10-09-2019 - 20-09-2019
+INFO:root:Start load 10-01-2020 - 20-01-2020
+INFO:root:Load 302.089 s.,  fetched 6527553 rows for dates 01-11-2019 - 10-11-2019
+INFO:root:End load 01-11-2019 - 10-11-2019
+INFO:root:Start load 20-01-2020 - 01-02-2020
+INFO:root:Load 322.262 s.,  fetched 6663060 rows for dates 01-12-2019 - 10-12-2019
+INFO:root:End load 01-12-2019 - 10-12-2019
+INFO:root:Start load 01-02-2020 - 10-02-2020
+INFO:root:Load 359.773 s.,  fetched 7176585 rows for dates 10-11-2019 - 20-11-2019
+INFO:root:End load 10-11-2019 - 20-11-2019
+INFO:root:Start load 10-02-2020 - 20-02-2020
+INFO:root:Load 383.552 s.,  fetched 7410894 rows for dates 20-11-2019 - 01-12-2019
+INFO:root:End load 20-11-2019 - 01-12-2019
+INFO:root:Start load 20-02-2020 - 01-03-2020
+INFO:root:Load 430.333 s.,  fetched 6827173 rows for dates 01-10-2019 - 10-10-2019
+INFO:root:End load 01-10-2019 - 10-10-2019
+INFO:root:Start load 01-03-2020 - 10-03-2020
+INFO:root:Load 451.599 s.,  fetched 8043646 rows for dates 10-12-2019 - 20-12-2019
+INFO:root:End load 10-12-2019 - 20-12-2019
+INFO:root:Start load 10-03-2020 - 20-03-2020
+INFO:root:Load 503.889 s.,  fetched 9076828 rows for dates 20-10-2019 - 01-11-2019
+INFO:root:End load 20-10-2019 - 01-11-2019
+INFO:root:Start load 20-03-2020 - 01-04-2020
+INFO:root:Load 536.591 s.,  fetched 7605552 rows for dates 10-10-2019 - 20-10-2019
+INFO:root:End load 10-10-2019 - 20-10-2019
+INFO:root:Start load 01-04-2020 - 10-04-2020
+INFO:root:Load 584.262 s.,  fetched 8249555 rows for dates 20-09-2019 - 01-10-2019
+INFO:root:End load 20-09-2019 - 01-10-2019
+INFO:root:Start load 10-04-2020 - 20-04-2020
+INFO:root:Load 467.325 s.,  fetched 6873162 rows for dates 01-01-2020 - 10-01-2020
+INFO:root:End load 01-01-2020 - 10-01-2020
+INFO:root:Start load 20-04-2020 - 01-05-2020
+INFO:root:Load 587.106 s.,  fetched 9308140 rows for dates 20-12-2019 - 01-01-2020
+INFO:root:End load 20-12-2019 - 01-01-2020
+INFO:root:Load 513.663 s.,  fetched 7930482 rows for dates 01-02-2020 - 10-02-2020
+INFO:root:End load 01-02-2020 - 10-02-2020
+INFO:root:Load 591.630 s.,  fetched 8736807 rows for dates 10-01-2020 - 20-01-2020
+INFO:root:End load 10-01-2020 - 20-01-2020
+INFO:root:Load 388.493 s.,  fetched 6833822 rows for dates 01-04-2020 - 10-04-2020
+INFO:root:End load 01-04-2020 - 10-04-2020
+INFO:root:Load 578.522 s.,  fetched 9300256 rows for dates 20-02-2020 - 01-03-2020
+INFO:root:End load 20-02-2020 - 01-03-2020
+INFO:root:Load 650.087 s.,  fetched 9714638 rows for dates 10-02-2020 - 20-02-2020
+INFO:root:End load 10-02-2020 - 20-02-2020
+INFO:root:Load 576.178 s.,  fetched 8424930 rows for dates 10-03-2020 - 20-03-2020
+INFO:root:End load 10-03-2020 - 20-03-2020
+INFO:root:Load 654.705 s.,  fetched 7529541 rows for dates 01-03-2020 - 10-03-2020
+INFO:root:End load 01-03-2020 - 10-03-2020
+INFO:root:Load 556.984 s.,  fetched 8208056 rows for dates 10-04-2020 - 20-04-2020
+INFO:root:End load 10-04-2020 - 20-04-2020
+INFO:root:Load 867.749 s.,  fetched 11341194 rows for dates 20-01-2020 - 01-02-2020
+INFO:root:End load 20-01-2020 - 01-02-2020
+INFO:root:Load 828.492 s.,  fetched 10162585 rows for dates 20-03-2020 - 01-04-2020
+INFO:root:End load 20-03-2020 - 01-04-2020
+INFO:root:Load 795.641 s.,  fetched 10052786 rows for dates 20-04-2020 - 01-05-2020
+INFO:root:End load 20-04-2020 - 01-05-2020
+CPU times: user 17min 50s, sys: 3min 15s, total: 21min 5s
+Wall time: 25min 6s
+%%time
+import gc
+
+df = pd.concat(df_list)
+df.reset_index(drop=True, inplace=True)
+print(df.shape)
+
+del df_list
+gc.collect()
+(196746825, 5)
+CPU times: user 1min 8s, sys: 19.7 s, total: 1min 27s
+Wall time: 1min 27s
+189
+select /*+PARALLEL(8)*/ count(1) from TMP_PK_MAP_SMS_500LMT -- 206 258 235
+# TypeError: no supported conversion for types: (dtype('O'),)
+# df["CNT_SMS"] = df["CNT_SMS"].apply(lambda x: float(x))
+df.head()
+INQR_ID	MSISDN_FROM_SMGT_SMGT_ID	CNT_SMS	DURATION	DIFF_CLAIMS
+0	300347300	MegaFon_511801000	1.0	0.000000	0.033600
+1	301647000	MegaFon_100011	1.0	0.000000	2.792969
+2	301795700	MegaFon_511801000	1.0	0.000000	3.773438
+3	301887600	MegaFon_100011	2.0	0.047699	1.818359
+4	302607300	MegaFon_100011	6.0	3.595703	2.068359%%time df.isna().sum()
+df.info()
+<class 'pandas.core.frame.DataFrame'>
+RangeIndex: 196746825 entries, 0 to 196746824
+Data columns (total 5 columns):
+INQR_ID                     object
+MSISDN_FROM_SMGT_SMGT_ID    object
+CNT_SMS                     float32
+DURATION                    float16
+DIFF_CLAIMS                 float16
+dtypes: float16(2), float32(1), object(2)
+memory usage: 4.4+ GB
+%%time
+max(df['CNT_SMS'])  
+
+#'CNhttp://msk-wrk-dev02:8888/user/pkrylov/notebooks/create_prod_sms.ipynb#sparse_matrix---%3E-parquetT_SMS':'float32' не float16
+# select /*+PARALLEL(8)*/ max(CNT_SMS) from  TMP_PK_MAP_SMS_500LMT
+# 179222
+CPU times: user 13.9 s, sys: 257 ms, total: 14.1 s
+Wall time: 14.1 s
+179222.0
+sparse_matrix --> parquet
+# 'wl - with out latency
+#'15min': 0.010416667
+
+latency_dict = {'wl':  -1.0, 
+                '15min': 0.010416667
+                '30min': 0.020833333,
+                '1hour': 0.041666667,               
+                '3hour': 0.125,
+                '6hour': 0.25,
+                '12hour': 0.5,
+                '24hour': 1.0}
+
+deep_list = [3,7,14,45] 
+# глубина данных
+# 'wl - with out latency
+#'15min': 0.010416667
+
+latency_dict = {'15min': 0.010416667}
+
+deep_list = [3,7,14,45] 
+# глубина данных
+prefix = table_name.lower().split('_')[-1] np.savez(f"{PATH}/storage2/index_sms_{prefix}.npz", np.array(index))
+i = 0
+for deep in deep_list:   
+    for latency, value in latency_dict.items():  
+        i+=1
+print(i)        
+4
+%%time
+import numpy as np 
+import gc
+import scipy
+from pandas.api.types import CategoricalDtype
+from scipy.sparse import hstack, csr_matrix
+
+PATH = "/data/share/pkrylov_cb"
+
+# по таблице которая поднята в память
+column_name = "MSISDN_FROM_SMGT_SMGT_ID"
+table_name = "TMP_PK_MAP_SMS_500LMT" # + add 1000LMT
+
+lmt_prefix = table_name.lower().split('_')[-1]
+index_all = np.load(f"{PATH}/storage2/index_sms_{lmt_prefix}.npz", allow_pickle=True)
+index_all = index_all.f.arr_0
+print(table_name , len(index_all))    
+
+inqr_id_c = CategoricalDtype(index_all, ordered=True)
+column_c = CategoricalDtype(sorted(df[column_name].unique()), ordered=True)
+      
+col_name = []
+prefix = "SMS"   
+
+# количество клонок при pivot  д.б. постоянное для разных deep и latency   
+for col_ in ["CNT_SMS", "DURATION", "DIFF_CLAIMS"]:    
+    col_name_ = [f"{prefix}_{x.upper()}_{col_}"  for x in column_c.categories]   
+    col_name += col_name_   
+      
+# col_name 
+np.savez(f"{PATH}/storage2/column_{prefix.lower()}_{lmt_prefix}", np.array(col_name))           
+
+for deep in deep_list:   
+    for latency, value in latency_dict.items():  
+        t0 =  time.time()
+        logging.info ("Start creating deep {}  latency {}".format(deep, latency))
+
+        df_ = df.query(f"DIFF_CLAIMS > {value}  & DIFF_CLAIMS < {deep}")
+
+        row = df_.INQR_ID.astype(inqr_id_c).cat.codes
+        col = df_[column_name].astype(column_c).cat.codes
+
+        sparse_matrix_list = []
+        # df_ еще нужен -- >  df_[col_]
+        # in list columns - INQR_ID и колонки по которой PIVOT
+
+        for col_ in ["CNT_SMS", "DURATION", "DIFF_CLAIMS"]:
+            t1 =  time.time() 
+            sparse_matrix_ = csr_matrix((df_[col_], (row, col)), \
+                                       shape=(inqr_id_c.categories.size, column_c.categories.size))
+
+            sparse_matrix_list.append(sparse_matrix_)
+
+            t2 =  time.time() 
+            logging.info ("Create sparse {} matrix for {}  {:.3f} s.".format(col_, latency, t2 - t1))
+            #break
+
+        sparse_matrix_list.append(csr_matrix(index_all).reshape(-1,1).tocsr())
+        sparse_matrix = hstack(sparse_matrix_list)
+        logging.info ("Create sparse matrix shape {}".format(sparse_matrix.shape))
+
+        del sparse_matrix_list
+        gc.collect()
+
+#       scipy.sparse.save_npz(f"{PATH}/storage2/map_sms_{lmt_prefix}_deep{deep}_{latency}_sparse.npz", sparse_matrix)
+#       t3 =  time.time()
+#       logging.info("Save {:.3f} s. map_sms_{}_{}_{}_sparse.npz".format(t3 - t0, lmt_prefix, deep, latency)) 
+        
+        pd_df = pd.DataFrame( {'row': sparse_matrix.row,
+                               'col': sparse_matrix.col, 
+                               'data': sparse_matrix.data })
+        pd_df = pd_df[['row', 'col', 'data']]    
+
+        del sparse_matrix
+        gc.collect()
+
+        pd_df.to_parquet(f"/data/share/pkrylov_cb/storage2/x_sms_{lmt_prefix}_{deep}_{latency}.parquet.snappy",
+                      engine = 'pyarrow',
+                      index = False,
+                      compression = 'snappy')
+
+        t4 =  time.time()    
+        logging.info("Save {:.3f} s., sparse_matrix to parquet {} deep {} latency {}"\
+               .format(t4 - t0, lmt_prefix, deep, latency))  
+        
+TMP_PK_MAP_SMS_500LMT 27970718
+INFO:root:Start creating deep 3  latency 15min
+INFO:root:Create sparse CNT_SMS matrix for 15min  5.515 s.
+INFO:root:Create sparse DURATION matrix for 15min  5.840 s.
+INFO:root:Create sparse DIFF_CLAIMS matrix for 15min  5.863 s.
+INFO:root:Create sparse matrix shape (27970718, 130)
+INFO:root:Save 109.399 s., sparse_matrix to parquet 500lmt deep 3 latency 15min
+INFO:root:Start creating deep 7  latency 15min
+INFO:root:Create sparse CNT_SMS matrix for 15min  8.169 s.
+INFO:root:Create sparse DURATION matrix for 15min  8.894 s.
+INFO:root:Create sparse DIFF_CLAIMS matrix for 15min  8.602 s.
+INFO:root:Create sparse matrix shape (27970718, 130)
+INFO:root:Save 137.687 s., sparse_matrix to parquet 500lmt deep 7 latency 15min
+INFO:root:Start creating deep 14  latency 15min
+INFO:root:Create sparse CNT_SMS matrix for 15min  12.075 s.
+INFO:root:Create sparse DURATION matrix for 15min  12.366 s.
+INFO:root:Create sparse DIFF_CLAIMS matrix for 15min  12.059 s.
+INFO:root:Create sparse matrix shape (27970718, 130)
+INFO:root:Save 171.674 s., sparse_matrix to parquet 500lmt deep 14 latency 15min
+INFO:root:Start creating deep 45  latency 15min
+INFO:root:Create sparse CNT_SMS matrix for 15min  19.702 s.
+INFO:root:Create sparse DURATION matrix for 15min  21.253 s.
+INFO:root:Create sparse DIFF_CLAIMS matrix for 15min  20.655 s.
+INFO:root:Create sparse matrix shape (27970718, 130)
+INFO:root:Save 244.572 s., sparse_matrix to parquet 500lmt deep 45 latency 15min
+CPU times: user 8min 52s, sys: 2min 40s, total: 11min 33s
+Wall time: 11min 28s
+MP_PK_MAP_SMS_500LMT 27970718 INFO:root:Start creating deep 3 latency wl INFO:root:Create sparse CNT_SMS matrix for wl 10.416 s. INFO:root:Create sparse DURATION matrix for wl 9.193 s. INFO:root:Create sparse DIFF_CLAIMS matrix for wl 9.035 s. INFO:root:Save 144.719 s., sparse_matrix to parquet 500lmt deep 3 latency wl INFO:root:Start creating deep 3 latency 30min INFO:root:Create sparse CNT_SMS matrix for 30min 6.123 s. INFO:root:Create sparse DURATION matrix for 30min 5.755 s. INFO:root:Create sparse DIFF_CLAIMS matrix for 30min 5.556 s. INFO:root:Save 110.227 s., sparse_matrix to parquet 500lmt deep 3 latency 30min INFO:root:Start creating deep 3 latency 1hour INFO:root:Create sparse CNT_SMS matrix for 1hour 5.538 s. INFO:root:Create sparse DURATION matrix for 1hour 4.956 s. INFO:root:Create sparse DIFF_CLAIMS matrix for 1hour 4.795 s. INFO:root:Save 101.946 s., sparse_matrix to parquet 500lmt deep 3 latency 1hour INFO:root:Start creating deep 3 latency 3hour INFO:root:Create sparse CNT_SMS matrix for 3hour 4.675 s. INFO:root:Create sparse DURATION matrix for 3hour 4.232 s. INFO:root:Create sparse DIFF_CLAIMS matrix for 3hour 4.054 s. INFO:root:Save 90.587 s., sparse_matrix to parquet 500lmt deep 3 latency 3hour INFO:root:Start creating deep 3 latency 6hour INFO:root:Create sparse CNT_SMS matrix for 6hour 3.907 s. INFO:root:Create sparse DURATION matrix for 6hour 3.599 s. INFO:root:Create sparse DIFF_CLAIMS matrix for 6hour 3.547 s. INFO:root:Save 86.642 s., sparse_matrix to parquet 500lmt deep 3 latency 6hour INFO:root:Start creating deep 3 latency 12hour INFO:root:Create sparse CNT_SMS matrix for 12hour 3.461 s. INFO:root:Create sparse DURATION matrix for 12hour 3.022 s. INFO:root:Create sparse DIFF_CLAIMS matrix for 12hour 3.237 s. INFO:root:Save 76.446 s., sparse_matrix to parquet 500lmt deep 3 latency 12hour INFO:root:Start creating deep 3 latency 24hour INFO:root:Create sparse CNT_SMS matrix for 24hour 3.238 s. INFO:root:Create sparse DURATION matrix for 24hour 3.082 s. INFO:root:Create sparse DIFF_CLAIMS matrix for 24hour 3.006 s. INFO:root:Save 77.688 s., sparse_matrix to parquet 500lmt deep 3 latency 24hour INFO:root:Start creating deep 7 latency wl INFO:root:Create sparse CNT_SMS matrix for wl 13.771 s. INFO:root:Create sparse DURATION matrix for wl 12.889 s. INFO:root:Create sparse DIFF_CLAIMS matrix for wl 12.564 s. INFO:root:Save 176.860 s., sparse_matrix to parquet 500lmt deep 7 latency wl INFO:root:Start creating deep 7 latency 30min INFO:root:Create sparse CNT_SMS matrix for 30min 9.927 s. INFO:root:Create sparse DURATION matrix for 30min 9.289 s. INFO:root:Create sparse DIFF_CLAIMS matrix for 30min 8.334 s. INFO:root:Save 140.006 s., sparse_matrix to parquet 500lmt deep 7 latency 30min INFO:root:Start creating deep 7 latency 1hour INFO:root:Create sparse CNT_SMS matrix for 1hour 9.074 s. INFO:root:Create sparse DURATION matrix for 1hour 8.360 s. INFO:root:Create sparse DIFF_CLAIMS matrix for 1hour 8.635 s. INFO:root:Save 137.479 s., sparse_matrix to parquet 500lmt deep 7 latency 1hour INFO:root:Start creating deep 7 latency 3hour INFO:root:Create sparse CNT_SMS matrix for 3hour 9.087 s. INFO:root:Create sparse DURATION matrix for 3hour 8.179 s. INFO:root:Create sparse DIFF_CLAIMS matrix for 3hour 6.914 s. INFO:root:Save 129.715 s., sparse_matrix to parquet 500lmt deep 7 latency 3hour INFO:root:Start creating deep 7 latency 6hour INFO:root:Create sparse CNT_SMS matrix for 6hour 7.244 s. INFO:root:Create sparse DURATION matrix for 6hour 6.215 s. INFO:root:Create sparse DIFF_CLAIMS matrix for 6hour 6.193 s. INFO:root:Save 115.725 s., sparse_matrix to parquet 500lmt deep 7 latency 6hour INFO:root:Start creating deep 7 latency 12hour INFO:root:Create sparse CNT_SMS matrix for 12hour 6.357 s. INFO:root:Create sparse DURATION matrix for 12hour 5.666 s. INFO:root:Create sparse DIFF_CLAIMS matrix for 12hour 5.580 s. INFO:root:Save 108.353 s., sparse_matrix to parquet 500lmt deep 7 latency 12hour INFO:root:Start creating deep 7 latency 24hour INFO:root:Create sparse CNT_SMS matrix for 24hour 6.455 s. INFO:root:Create sparse DURATION matrix for 24hour 5.728 s. INFO:root:Create sparse DIFF_CLAIMS matrix for 24hour 5.509 s. INFO:root:Save 108.566 s., sparse_matrix to parquet 500lmt deep 7 latency 24hour INFO:root:Start creating deep 14 latency wl INFO:root:Create sparse CNT_SMS matrix for wl 18.018 s. INFO:root:Create sparse DURATION matrix for wl 16.767 s. INFO:root:Create sparse DIFF_CLAIMS matrix for wl 16.849 s. INFO:root:Save 209.951 s., sparse_matrix to parquet 500lmt deep 14 latency wl INFO:root:Start creating deep 14 latency 30min INFO:root:Create sparse CNT_SMS matrix for 30min 13.546 s. INFO:root:Create sparse DURATION matrix for 30min 12.188 s. INFO:root:Create sparse DIFF_CLAIMS matrix for 30min 11.857 s. INFO:root:Save 172.918 s., sparse_matrix to parquet 500lmt deep 14 latency 30min INFO:root:Start creating deep 14 latency 1hour INFO:root:Create sparse CNT_SMS matrix for 1hour 13.391 s. INFO:root:Create sparse DURATION matrix for 1hour 11.834 s. INFO:root:Create sparse DIFF_CLAIMS matrix for 1hour 11.764 s. INFO:root:Save 167.842 s., sparse_matrix to parquet 500lmt deep 14 latency 1hour INFO:root:Start creating deep 14 latency 3hour INFO:root:Create sparse CNT_SMS matrix for 3hour 12.074 s. INFO:root:Create sparse DURATION matrix for 3hour 10.829 s. INFO:root:Create sparse DIFF_CLAIMS matrix for 3hour 11.171 s. INFO:root:Save 158.592 s., sparse_matrix to parquet 500lmt deep 14 latency 3hour INFO:root:Start creating deep 14 latency 6hour INFO:root:Create sparse CNT_SMS matrix for 6hour 11.096 s. INFO:root:Create sparse DURATION matrix for 6hour 10.323 s. INFO:root:Create sparse DIFF_CLAIMS matrix for 6hour 10.209 s. INFO:root:Save 150.112 s., sparse_matrix to parquet 500lmt deep 14 latency 6hour INFO:root:Start creating deep 14 latency 12hour INFO:root:Create sparse CNT_SMS matrix for 12hour 10.970 s. INFO:root:Create sparse DURATION matrix for 12hour 9.565 s. INFO:root:Create sparse DIFF_CLAIMS matrix for 12hour 9.129 s. INFO:root:Save 146.583 s., sparse_matrix to parquet 500lmt deep 14 latency 12hour INFO:root:Start creating deep 14 latency 24hour INFO:root:Create sparse CNT_SMS matrix for 24hour 10.908 s. INFO:root:Create sparse DURATION matrix for 24hour 9.921 s. INFO:root:Create sparse DIFF_CLAIMS matrix for 24hour 9.098 s. INFO:root:Save 147.000 s., sparse_matrix to parquet 500lmt deep 14 latency 24hour INFO:root:Start creating deep 45 latency wl INFO:root:Create sparse CNT_SMS matrix for wl 27.058 s. INFO:root:Create sparse DURATION matrix for wl 26.216 s. INFO:root:Create sparse DIFF_CLAIMS matrix for wl 27.372 s. INFO:root:Save 290.833 s., sparse_matrix to parquet 500lmt deep 45 latency wl INFO:root:Start creating deep 45 latency 30min INFO:root:Create sparse CNT_SMS matrix for 30min 23.431 s. INFO:root:Create sparse DURATION matrix for 30min 23.454 s. INFO:root:Create sparse DIFF_CLAIMS matrix for 30min 22.511 s. INFO:root:Save 258.845 s., sparse_matrix to parquet 500lmt deep 45 latency 30min INFO:root:Start creating deep 45 latency 1hour INFO:root:Create sparse CNT_SMS matrix for 1hour 21.908 s. INFO:root:Create sparse DURATION matrix for 1hour 21.616 s. INFO:root:Create sparse DIFF_CLAIMS matrix for 1hour 21.345 s. INFO:root:Save 251.767 s., sparse_matrix to parquet 500lmt deep 45 latency 1hour INFO:root:Start creating deep 45 latency 3hour INFO:root:Create sparse CNT_SMS matrix for 3hour 21.133 s. INFO:root:Create sparse DURATION matrix for 3hour 20.081 s. INFO:root:Create sparse DIFF_CLAIMS matrix for 3hour 19.929 s. INFO:root:Save 238.932 s., sparse_matrix to parquet 500lmt deep 45 latency 3hour INFO:root:Start creating deep 45 latency 6hour INFO:root:Create sparse CNT_SMS matrix for 6hour 21.637 s. INFO:root:Create sparse DURATION matrix for 6hour 20.088 s. INFO:root:Create sparse DIFF_CLAIMS matrix for 6hour 20.449 s. INFO:root:Save 234.769 s., sparse_matrix to parquet 500lmt deep 45 latency 6hour INFO:root:Start creating deep 45 latency 12hour INFO:root:Create sparse CNT_SMS matrix for 12hour 19.400 s. INFO:root:Create sparse DURATION matrix for 12hour 18.226 s. INFO:root:Create sparse DIFF_CLAIMS matrix for 12hour 18.266 s. INFO:root:Save 228.365 s., sparse_matrix to parquet 500lmt deep 45 latency 12hour INFO:root:Start creating deep 45 latency 24hour INFO:root:Create sparse CNT_SMS matrix for 24hour 20.137 s. INFO:root:Create sparse DURATION matrix for 24hour 19.984 s. INFO:root:Create sparse DIFF_CLAIMS matrix for 24hour 18.777 s. INFO:root:Save 230.514 s., sparse_matrix to parquet 500lmt deep 45 latency 24hour CPU times: user 58min 11s, sys: 17min 42s, total: 1h 15min 54s Wall time: 1h 15min 15s
+index_all source data
+# feed_bigdata3
+выше перебирали deep и latency что выбрать оптимальные параметры deep и оценить влияния задержки для данных из каждого ОТДЕЛЬНОГО ИСТОЧНИКА на общее качество модели потому не сохраняли в sparse.save_npz формат чтобы не переполнять диск теперь нужно сохранить именно в sparse.save_npz не сохраняя в pd_df.to_parquet т.к. будут оцениваться качество именно всех источничников данных и сборка в pd_df.to_parquet будет после sparse_matrix = hstack(sparse_matrix_list) всех матриц источников данных но раньше для всех разных вариантов задержки и глубины данных брался общий индекс полученный в разрезе каждого источника данных для варианта без задержки с дефолтной глубиной в 4 дней то теперь общий индекс нужно построить на уровне всех источников данных, а также поле для обединения с лейблами NQIR_ID вставить к последней законкаченной таблице500 42 TMP_PK_MAP_SMS_500LMT 1000 30 TMP_PK_MAP_SMS_1000LMT 10000 14 TMP_PK_MAP_SMS_10000LMT -- не используется 100t 452 250t 344 TMP_PK_MAP_USER_ACTIONS_250LMT 1mio 224 TMP_PK_MAP_USER_ACTIONS_1000LMT 100t 452 TMP_PK_MAP_USER_ACTIONS2_100LMT 250t 344 TMP_PK_MAP_USER_ACTIONS2_250LMT 1mio 224 50t 1436 500t 579 TMP_PK_MAP_VASP_SERV_500LMT 3mln 245 TMP_PK_MAP_VASP_SERV_3000LMT
+# возможны несколько вариантов сборки с разных количеством проектируемых признаков  (после пивот)
+# соберем крайние варианты - все доступные таблицы с макс количеством признаков и все с минимальным
+
+# small
+table_name_list = ["TMP_PK_MAP_SMS_1000LMT",
+                   "TMP_PK_MAP_USER_ACTIONS_1000LMT",
+                   "TMP_PK_MAP_USER_ACTIONS2_250LMT",
+                   "TMP_PK_MAP_VASP_SERV_3000LMT",
+                   "TMP_PK_MAP_ROAM14"]
+# big
+table_name_list = ["TMP_PK_MAP_SMS_500LMT",
+                   "TMP_PK_MAP_USER_ACTIONS_250LMT",
+                   "TMP_PK_MAP_USER_ACTIONS2_100LMT",
+                   "TMP_PK_MAP_VASP_SERV_500LMT",
+                   "TMP_PK_MAP_ROAM14"]
+%%time import logging import sys import time logging.basicConfig(stream=sys.stdout, level=logging.INFO) # small table_name_list = ["TMP_PK_MAP_SMS_1000LMT", "TMP_PK_MAP_USER_ACTIONS_1000LMT", "TMP_PK_MAP_USER_ACTIONS2_250LMT", "TMP_PK_MAP_VASP_SERV_3000LMT", "TMP_PK_MAP_ROAM14"] index_dict = {} for table_name in table_name_list: t0 = time.time() query = f"SELECT /*+PARALLEL(8)*/ DISTINCT INQR_ID FROM {table_name}" index = ora.read_sql(query) index_dict[table_name] = index.INQR_ID.values.tolist() t1 = time.time() logging.info("Load {:.3f} s., DISTINCT INQR_ID {}".format(t1 - t0, table_name)) #break # долго сделаем мультипоточно!
 %%time
 import logging
 import sys
@@ -25,3 +868,318 @@ def get_distinct_inqrid(table_name):
     
     t1 =  time.time()
     logging.info("Load {:.3f} s., DISTINCT INQR_ID {}".format(t1 - t0, table_name))   
+CPU times: user 7 µs, sys: 11 µs, total: 18 µs
+Wall time: 22.2 µs
+%%time
+import multiprocessing.dummy as multiprocessing
+logging.info("start parallel fetch ORACLE!")
+
+try:
+    processes = min(6, len(table_name_list))
+    p = multiprocessing.Pool(processes = processes)
+    df_list = p.map(get_distinct_inqrid, table_name_list)
+
+    p.close()
+    p.join()
+
+except KeyboardInterrupt:
+    logging.info("KeyboardInterrupt !")
+INFO:root:start parallel fetch ORACLE!
+INFO:root:SELECT /*+PARALLEL(8)*/ DISTINCT INQR_ID  FROM TMP_PK_MAP_SMS_1000LMT
+INFO:root:SELECT /*+PARALLEL(8)*/ DISTINCT INQR_ID  FROM TMP_PK_MAP_USER_ACTIONS_1000LMT
+INFO:root:SELECT /*+PARALLEL(8)*/ DISTINCT INQR_ID  FROM TMP_PK_MAP_USER_ACTIONS2_250LMT
+INFO:root:SELECT /*+PARALLEL(8)*/ DISTINCT INQR_ID  FROM TMP_PK_MAP_VASP_SERV_3000LMT
+INFO:root:SELECT /*+PARALLEL(8)*/ DISTINCT INQR_ID  FROM TMP_PK_MAP_ROAM14
+INFO:root:Load 303.930 s., DISTINCT INQR_ID TMP_PK_MAP_ROAM14
+INFO:root:Load 724.052 s., DISTINCT INQR_ID TMP_PK_MAP_VASP_SERV_3000LMT
+INFO:root:Load 1067.412 s., DISTINCT INQR_ID TMP_PK_MAP_USER_ACTIONS2_250LMT
+INFO:root:Load 1098.511 s., DISTINCT INQR_ID TMP_PK_MAP_SMS_1000LMT
+INFO:root:Load 1177.035 s., DISTINCT INQR_ID TMP_PK_MAP_USER_ACTIONS_1000LMT
+CPU times: user 2min 48s, sys: 1min 8s, total: 3min 57s
+Wall time: 19min 37s
+index_dict.keys()
+dict_keys(['TMP_PK_MAP_ROAM14', 'TMP_PK_MAP_VASP_SERV_3000LMT', 'TMP_PK_MAP_USER_ACTIONS2_250LMT', 'TMP_PK_MAP_SMS_1000LMT', 'TMP_PK_MAP_USER_ACTIONS_1000LMT'])
+%%time
+index_all = []
+
+for k, v in index_dict.items():
+    index_all += v
+    
+index_all = set(index_all)  
+index_all = sorted(list(index_all))
+logging.info("Len index_all".format(len(index_all))) 
+INFO:root:Len index_all
+CPU times: user 33.7 s, sys: 3.78 s, total: 37.5 s
+Wall time: 37.1 s
+len(index_all)
+37333204
+%%time
+type_index = "small"
+PATH = "/data/share/pkrylov_cb"
+np.savez(f"{PATH}/storage2/index_{type_index}_all.npz", np.array(index_all))
+CPU times: user 12.1 s, sys: 455 ms, total: 12.6 s
+Wall time: 12.5 s
+# big version
+import gc
+
+del index_dict
+gc.collect()
+71
+# big
+table_name_list = ["TMP_PK_MAP_SMS_500LMT",
+                   "TMP_PK_MAP_USER_ACTIONS_250LMT",
+                   "TMP_PK_MAP_USER_ACTIONS2_100LMT",
+                   "TMP_PK_MAP_VASP_SERV_500LMT",
+                   "TMP_PK_MAP_ROAM14"]
+index_dict = {}
+%%time
+import multiprocessing.dummy as multiprocessing
+logging.info("start parallel fetch ORACLE!")
+
+try:
+    processes = min(6, len(table_name_list))
+    p = multiprocessing.Pool(processes = processes)
+    df_list = p.map(get_distinct_inqrid, table_name_list)
+
+    p.close()
+    p.join()
+
+except KeyboardInterrupt:
+    logging.info("KeyboardInterrupt !")
+INFO:root:start parallel fetch ORACLE!
+INFO:root:SELECT /*+PARALLEL(8)*/ DISTINCT INQR_ID  FROM TMP_PK_MAP_SMS_500LMT
+INFO:root:SELECT /*+PARALLEL(8)*/ DISTINCT INQR_ID  FROM TMP_PK_MAP_USER_ACTIONS_250LMT
+INFO:root:SELECT /*+PARALLEL(8)*/ DISTINCT INQR_ID  FROM TMP_PK_MAP_USER_ACTIONS2_100LMT
+INFO:root:SELECT /*+PARALLEL(8)*/ DISTINCT INQR_ID  FROM TMP_PK_MAP_VASP_SERV_500LMT
+INFO:root:SELECT /*+PARALLEL(8)*/ DISTINCT INQR_ID  FROM TMP_PK_MAP_ROAM14
+INFO:root:Load 310.808 s., DISTINCT INQR_ID TMP_PK_MAP_ROAM14
+INFO:root:Load 891.953 s., DISTINCT INQR_ID TMP_PK_MAP_VASP_SERV_500LMT
+INFO:root:Load 1062.158 s., DISTINCT INQR_ID TMP_PK_MAP_USER_ACTIONS_250LMT
+INFO:root:Load 1237.613 s., DISTINCT INQR_ID TMP_PK_MAP_SMS_500LMT
+INFO:root:Load 1270.657 s., DISTINCT INQR_ID TMP_PK_MAP_USER_ACTIONS2_100LMT
+CPU times: user 2min 54s, sys: 1min 5s, total: 4min
+Wall time: 21min 10s
+%%time
+index_all = []
+
+for k, v in index_dict.items():
+    index_all += v
+    
+index_all = set(index_all)  
+index_all = sorted(list(index_all))
+logging.info("Len index_all".format(len(index_all))) 
+
+type_index = "big"
+PATH = "/data/share/pkrylov_cb"
+np.savez(f"{PATH}/storage2/index_{type_index}_all.npz", np.array(index_all))
+INFO:root:Len index_all
+CPU times: user 52.6 s, sys: 5.32 s, total: 57.9 s
+Wall time: 57.7 s
+len(index_all)
+37420081
+sparse_matrix --> scipy.sparse.save_npz
+изменения в коде по сравнению с sparse_matrix --> parquet используется общий для всех источников данных индекс - big / small закомментирована строка -- sparse_matrix_list.append(csr_matrix(index_all).reshape(-1,1).tocsr()) поскольку колонку INQR_ID будет добавлена на этапе сборки всех матриц
+table_name # small
+
+# 500 42       TMP_PK_MAP_SMS_500LMT
+# 1000 30      TMP_PK_MAP_SMS_1000LMT
+'TMP_PK_MAP_SMS_1000LMT'
+# 'wl - with out latency
+#'15min': 0.010416667
+
+latency_dict = {'wl':  -1.0, 
+                '15min': 0.010416667,
+                '30min': 0.020833333,
+                '1hour': 0.041666667,               
+                '3hour': 0.125,
+                '6hour': 0.25,
+                '12hour': 0.5,
+                '24hour': 1.0}
+
+deep_list = [45,14] 
+%%time
+# column_name  table_name prefix columns_list  тип алгоритма col_name_ type_index настраиваемые параметры
+
+import numpy as np 
+import gc
+import scipy
+from pandas.api.types import CategoricalDtype
+from scipy.sparse import hstack, csr_matrix
+
+PATH = "/data/share/pkrylov_cb"
+
+# по таблице которая поднята в память !!!
+column_name = "MSISDN_FROM_SMGT_SMGT_ID"
+table_name = "TMP_PK_MAP_SMS_1000LMT" # + add 1000LMT
+
+prefix = "SMS"   
+type_index = "small" # не перепутать! зависит от table_name
+
+lmt_prefix = table_name.lower().split('_')[-1]
+index_all = np.load(f"{PATH}/storage2/index_{type_index}_all.npz", allow_pickle=True)
+index_all = index_all.f.arr_0
+print(table_name , len(index_all))    
+
+inqr_id_c = CategoricalDtype(index_all, ordered=True)
+column_c = CategoricalDtype(sorted(df[column_name].unique()), ordered=True)
+      
+col_name = []
+columns_list = ["CNT_SMS", "DURATION", "DIFF_CLAIMS"]
+
+# количество клонок при pivot  д.б. постоянное для разных deep и latency   
+for col_ in columns_list:    
+    col_name_ = [f"{prefix}_{x.upper()}_{col_}"  for x in column_c.categories]   
+    col_name += col_name_   
+      
+# col_name 
+np.savez(f"{PATH}/storage2/column_sms_{lmt_prefix}", np.array(col_name))           
+
+for deep in deep_list:   
+    for latency, value in latency_dict.items():  
+        t0 =  time.time()
+        logging.info ("Start creating deep {}  latency {}".format(deep, latency))
+
+        df_ = df.query(f"DIFF_CLAIMS > {value}  & DIFF_CLAIMS < {deep}")
+
+        row = df_.INQR_ID.astype(inqr_id_c).cat.codes
+        col = df_[column_name].astype(column_c).cat.codes
+
+        sparse_matrix_list = []
+        # df_ еще нужен -- >  df_[col_]
+        # in list columns - INQR_ID и колонки по которой PIVOT
+
+        for col_ in ["CNT_SMS", "DURATION", "DIFF_CLAIMS"]:
+            t1 =  time.time() 
+            sparse_matrix_ = csr_matrix((df_[col_], (row, col)), \
+                                       shape=(inqr_id_c.categories.size, column_c.categories.size))
+
+            sparse_matrix_list.append(sparse_matrix_)
+
+            t2 =  time.time() 
+            logging.info ("Create sparse {} matrix for {}  {:.3f} s.".format(col_, latency, t2 - t1))
+            #break
+
+        #sparse_matrix_list.append(csr_matrix(index_all).reshape(-1,1).tocsr())
+        sparse_matrix = hstack(sparse_matrix_list)
+        logging.info ("Create sparse matrix shape {}".format(sparse_matrix.shape))
+
+        del sparse_matrix_list
+        gc.collect()
+
+        scipy.sparse.save_npz(f"{PATH}/storage2/map_sms_{lmt_prefix}_deep{deep}_{latency}_sparse.npz", sparse_matrix)
+        t3 =  time.time()
+        logging.info("Save {:.3f} s. map_sms_{}_{}_{}_sparse.npz".format(t3 - t0, lmt_prefix, deep, latency))        
+TMP_PK_MAP_SMS_1000LMT 37333204
+INFO:root:Start creating deep 45  latency wl
+INFO:root:Create sparse CNT_SMS matrix for wl  26.170 s.
+INFO:root:Create sparse DURATION matrix for wl  26.737 s.
+INFO:root:Create sparse DIFF_CLAIMS matrix for wl  30.929 s.
+INFO:root:Create sparse matrix shape (37333204, 93)
+INFO:root:Save 611.937 s. map_sms_1000lmt_45_wl_sparse.npz
+INFO:root:Start creating deep 45  latency 15min
+INFO:root:Create sparse CNT_SMS matrix for 15min  20.846 s.
+INFO:root:Create sparse DURATION matrix for 15min  26.108 s.
+INFO:root:Create sparse DIFF_CLAIMS matrix for 15min  25.841 s.
+INFO:root:Create sparse matrix shape (37333204, 93)
+INFO:root:Save 549.212 s. map_sms_1000lmt_45_15min_sparse.npz
+INFO:root:Start creating deep 45  latency 30min
+INFO:root:Create sparse CNT_SMS matrix for 30min  22.003 s.
+INFO:root:Create sparse DURATION matrix for 30min  22.719 s.
+INFO:root:Create sparse DIFF_CLAIMS matrix for 30min  25.238 s.
+INFO:root:Create sparse matrix shape (37333204, 93)
+INFO:root:Save 534.636 s. map_sms_1000lmt_45_30min_sparse.npz
+INFO:root:Start creating deep 45  latency 1hour
+INFO:root:Create sparse CNT_SMS matrix for 1hour  20.124 s.
+INFO:root:Create sparse DURATION matrix for 1hour  22.847 s.
+INFO:root:Create sparse DIFF_CLAIMS matrix for 1hour  22.998 s.
+INFO:root:Create sparse matrix shape (37333204, 93)
+INFO:root:Save 519.505 s. map_sms_1000lmt_45_1hour_sparse.npz
+INFO:root:Start creating deep 45  latency 3hour
+INFO:root:Create sparse CNT_SMS matrix for 3hour  20.154 s.
+INFO:root:Create sparse DURATION matrix for 3hour  20.436 s.
+INFO:root:Create sparse DIFF_CLAIMS matrix for 3hour  21.883 s.
+INFO:root:Create sparse matrix shape (37333204, 93)
+INFO:root:Save 498.967 s. map_sms_1000lmt_45_3hour_sparse.npz
+INFO:root:Start creating deep 45  latency 6hour
+INFO:root:Create sparse CNT_SMS matrix for 6hour  18.067 s.
+INFO:root:Create sparse DURATION matrix for 6hour  20.664 s.
+INFO:root:Create sparse DIFF_CLAIMS matrix for 6hour  20.738 s.
+INFO:root:Create sparse matrix shape (37333204, 93)
+INFO:root:Save 477.102 s. map_sms_1000lmt_45_6hour_sparse.npz
+INFO:root:Start creating deep 45  latency 12hour
+INFO:root:Create sparse CNT_SMS matrix for 12hour  17.096 s.
+INFO:root:Create sparse DURATION matrix for 12hour  20.148 s.
+INFO:root:Create sparse DIFF_CLAIMS matrix for 12hour  19.354 s.
+INFO:root:Create sparse matrix shape (37333204, 93)
+INFO:root:Save 468.308 s. map_sms_1000lmt_45_12hour_sparse.npz
+INFO:root:Start creating deep 45  latency 24hour
+INFO:root:Create sparse CNT_SMS matrix for 24hour  21.924 s.
+INFO:root:Create sparse DURATION matrix for 24hour  22.246 s.
+INFO:root:Create sparse DIFF_CLAIMS matrix for 24hour  21.934 s.
+INFO:root:Create sparse matrix shape (37333204, 93)
+INFO:root:Save 481.148 s. map_sms_1000lmt_45_24hour_sparse.npz
+INFO:root:Start creating deep 14  latency wl
+INFO:root:Create sparse CNT_SMS matrix for wl  18.103 s.
+INFO:root:Create sparse DURATION matrix for wl  19.039 s.
+INFO:root:Create sparse DIFF_CLAIMS matrix for wl  18.527 s.
+INFO:root:Create sparse matrix shape (37333204, 93)
+INFO:root:Save 488.133 s. map_sms_1000lmt_14_wl_sparse.npz
+INFO:root:Start creating deep 14  latency 15min
+INFO:root:Create sparse CNT_SMS matrix for 15min  14.422 s.
+INFO:root:Create sparse DURATION matrix for 15min  14.452 s.
+INFO:root:Create sparse DIFF_CLAIMS matrix for 15min  14.332 s.
+INFO:root:Create sparse matrix shape (37333204, 93)
+INFO:root:Save 405.728 s. map_sms_1000lmt_14_15min_sparse.npz
+INFO:root:Start creating deep 14  latency 30min
+INFO:root:Create sparse CNT_SMS matrix for 30min  11.202 s.
+INFO:root:Create sparse DURATION matrix for 30min  13.462 s.
+INFO:root:Create sparse DIFF_CLAIMS matrix for 30min  14.051 s.
+INFO:root:Create sparse matrix shape (37333204, 93)
+INFO:root:Save 379.805 s. map_sms_1000lmt_14_30min_sparse.npz
+INFO:root:Start creating deep 14  latency 1hour
+INFO:root:Create sparse CNT_SMS matrix for 1hour  10.730 s.
+INFO:root:Create sparse DURATION matrix for 1hour  13.036 s.
+INFO:root:Create sparse DIFF_CLAIMS matrix for 1hour  12.862 s.
+INFO:root:Create sparse matrix shape (37333204, 93)
+INFO:root:Save 364.679 s. map_sms_1000lmt_14_1hour_sparse.npz
+INFO:root:Start creating deep 14  latency 3hour
+INFO:root:Create sparse CNT_SMS matrix for 3hour  8.959 s.
+INFO:root:Create sparse DURATION matrix for 3hour  10.370 s.
+INFO:root:Create sparse DIFF_CLAIMS matrix for 3hour  11.297 s.
+INFO:root:Create sparse matrix shape (37333204, 93)
+INFO:root:Save 340.350 s. map_sms_1000lmt_14_3hour_sparse.npz
+INFO:root:Start creating deep 14  latency 6hour
+INFO:root:Create sparse CNT_SMS matrix for 6hour  8.609 s.
+INFO:root:Create sparse DURATION matrix for 6hour  8.983 s.
+INFO:root:Create sparse DIFF_CLAIMS matrix for 6hour  10.412 s.
+INFO:root:Create sparse matrix shape (37333204, 93)
+INFO:root:Save 328.082 s. map_sms_1000lmt_14_6hour_sparse.npz
+INFO:root:Start creating deep 14  latency 12hour
+INFO:root:Create sparse CNT_SMS matrix for 12hour  8.103 s.
+INFO:root:Create sparse DURATION matrix for 12hour  8.119 s.
+INFO:root:Create sparse DIFF_CLAIMS matrix for 12hour  8.741 s.
+INFO:root:Create sparse matrix shape (37333204, 93)
+INFO:root:Save 313.285 s. map_sms_1000lmt_14_12hour_sparse.npz
+INFO:root:Start creating deep 14  latency 24hour
+INFO:root:Create sparse CNT_SMS matrix for 24hour  7.050 s.
+INFO:root:Create sparse DURATION matrix for 24hour  7.006 s.
+INFO:root:Create sparse DIFF_CLAIMS matrix for 24hour  6.776 s.
+INFO:root:Create sparse matrix shape (37333204, 93)
+INFO:root:Save 284.734 s. map_sms_1000lmt_14_24hour_sparse.npz
+CPU times: user 1h 43min 42s, sys: 14min 14s, total: 1h 57min 57s
+Wall time: 1h 57min 48s
+column_c # (30+RARE) *3 = 93
+CategoricalDtype(categories=['5460_511807000', '9260_511807000', 'MegaFon_100002',
+                  'MegaFon_100005', 'MegaFon_100006', 'MegaFon_100010',
+                  'MegaFon_100011', 'MegaFon_100013', 'MegaFon_100025',
+                  'MegaFon_100033', 'MegaFon_100035', 'MegaFon_100037',
+                  'MegaFon_100040', 'MegaFon_100041', 'MegaFon_100042',
+                  'MegaFon_100043', 'MegaFon_100048', 'MegaFon_100049',
+                  'MegaFon_100050', 'MegaFon_101062', 'MegaFon_101063',
+                  'MegaFon_101072', 'MegaFon_101075', 'MegaFon_101086',
+                  'MegaFon_2390600100', 'MegaFon_2404800006',
+                  'MegaFon_2503000001', 'MegaFon_511801000',
+                  'MegaFon_511802000', 'MegaFon_914700001', 'RARE'],
+                 ordered=True)
+ 
+ 
